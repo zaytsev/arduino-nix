@@ -6,22 +6,32 @@
     packages ? [],
     libraries ? [],
     runtimeInputs ? [],
+    fqbn,
   }: let
     arduino-cli = pkgs.wrapArduinoCLI {
       inherit packages libraries;
     };
+
+    lspCliConfig = pkgs.writeText "arduino-env-lsp-cli.yaml" (builtins.toJSON {});
   in
     pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
       name = "arduino-env";
 
-      buildInputs = [pkgs.makeWrapper];
+      buildInputs = [pkgs.makeWrapper pkgs.arduino-language-server pkgs.clang-tools];
 
       phases = ["buildPhase"];
 
       buildPhase = ''
         mkdir -p $out
         makeWrapper ${arduino-cli}/bin/arduino-cli $out/bin/arduino-cli \
+          --run 'export ARDUINO_DIRECTORIES_DOWNLOADS=$TMP' \
           --prefix PATH : ${lib.makeBinPath runtimeInputs}
+
+        makeWrapper ${pkgs.arduino-language-server}/bin/arduino-language-server $out/bin/arduino-language-server \
+          --add-flags "-cli $out/bin/arduino-cli" \
+          --add-flags "-cli-config ${lspCliConfig}" \
+          --add-flags "-clangd ${pkgs.clang-tools}/bin/clangd" \
+          --add-flags "-fqbn ${fqbn}"
       '';
 
       passthru = {
@@ -39,8 +49,8 @@
       inherit name src;
 
       buildPhase = ''
-        TEMP_DOWNLOADS_DIR=$(mktemp -d)
-        export ARDUINO_DIRECTORIES_DOWNLOADS="$TEMP_DOWNLOADS_DIR"
+        mkdir -p tmp
+        export ARDUINO_DIRECTORIES_DOWNLOADS="$(pwd)/tmp"
 
         ${arduinoEnv}/bin/arduino-cli compile --log --output-dir=out --fqbn=${fqbn}
       '';
